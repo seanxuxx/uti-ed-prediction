@@ -7,16 +7,13 @@ import pandas as pd
 import sklearn
 import torch
 import torch.nn as nn
-from imblearn.over_sampling import SMOTE
-from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (accuracy_score, classification_report,
                              confusion_matrix, f1_score, precision_score,
                              recall_score)
 from sklearn.model_selection import train_test_split
 
 import wandb
-from DataCleaning import process_data
+from DataCleaning import clean_data
 from ModelClasses import NN, TestDataset, TrainDataset
 from ModelFunctions import eval, test, train
 
@@ -77,7 +74,7 @@ def model_setting(input_size):
 
 
 def model_training(model, criterion, optimizer, scaler, scheduler,
-                   train_loader, val_loader, test_loader, y_test):
+                   train_loader, val_loader):
     torch.cuda.empty_cache()
     gc.collect()
     wandb.watch(model, log="all")
@@ -127,7 +124,6 @@ def model_training(model, criterion, optimizer, scaler, scheduler,
                        model, optimizer, scaler, scheduler,
                        epoch, train_acc, val_acc, precision, recall, best_score)
             print(f'Best model saved at epoch {epoch}')
-            model_testing(model, test_loader, y_test)
 
 
 def model_testing(model, test_loader, y_test, filename=None):
@@ -143,43 +139,39 @@ def model_testing(model, test_loader, y_test, filename=None):
         with open(f'reports/{wandb.run.id}_{filename}.txt', 'w') as report:
             report.write(report1)
             report.write(report2)  # type: ignore
-    else:
-        print(report1)
-        wandb.log({
-            'test_acc': accuracy_score(y_test, y_pred)*100,
-            'test_precison': precision_score(y_test, y_pred),
-            'test_recall': recall_score(y_test, y_pred),
-            'test_f1': f1_score(y_test, y_pred)
-        })
 
 
-def downsample_data(X_train, y_train):
+def process_data():
+    X, y = clean_data()
+    X_train_val, X_test, y_train_val, y_test = train_test_split(X, y,
+                                                                test_size=0.08,
+                                                                random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X_train_val,
+                                                      y_train_val,
+                                                      test_size=0.1,
+                                                      random_state=42)
     X_downsampled, y_downsampled = sklearn.utils.resample(
         X_train[y_train == 0],
         y_train[y_train == 0],
         replace=False,
-        n_samples=int(np.sum(y_train == 1) *
-                      wandb.config['class_ratio']),
+        n_samples=int(np.sum(y_train == 1) * wandb.config['class_ratio']),
         random_state=42)  # type: ignore
-
-    X_resampled = np.concatenate((X_downsampled,
-                                  X_train[y_train == 1]))
-    y_resampled = np.concatenate((y_downsampled,
-                                  y_train[y_train == 1]))
-
-    X_train, X_val, y_train, y_val = train_test_split(X_resampled,
-                                                      y_resampled,
-                                                      test_size=0.2,
-                                                      random_state=42)
-
-    return X_train, X_val, y_train, y_val
+    X_train = np.concatenate((X_downsampled,
+                              X_train[y_train == 1]))
+    y_train = np.concatenate((y_downsampled,
+                              y_train[y_train == 1]))
+    print(f'''
+Class ratio in training data:   {(y_train==1).sum()/len(y_train)*100 :2f}
+Class ratio in validation data: {(y_val==1).sum()/len(y_val)*100 :2f}
+Class ratio in test data:       {(y_test==1).sum()/len(y_test)*100 :2f}
+''')
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
 def sweep_train():
     with wandb.init():
         # Data processing
-        X_train, X_test, y_train, y_test = process_data()
-        X_train, X_val, y_train, y_val = downsample_data(X_train, y_train)
+        X_train, y_train, X_val, y_val, X_test, y_test = process_data()
 
         train_data = TrainDataset(X=X_train, y=y_train)
         val_data = TrainDataset(X=X_val, y=y_val)
@@ -208,7 +200,7 @@ def sweep_train():
          optimizer, scaler, scheduler) = model_setting(train_data.n_feature)
 
         model_training(model, criterion, optimizer, scaler, scheduler,
-                       train_loader, val_loader, test_loader, y_test)
+                       train_loader, val_loader)
 
         # Save results
         torch.save({'model_state_dict': model.state_dict(), },
@@ -233,12 +225,15 @@ if __name__ == '__main__':
             'name': 'val_precision'
         },
         'parameters': {
+            'name': {'value': 'downsample'},
             'epochs': {'value': 50},
             'class_ratio': {
-                'values': np.arange(1, 1.6, .1).tolist()
+                'distribution': 'uniform',
+                'min': 1,
+                'max': 2
             },
             'batch_size': {
-                'values': [64, 72, 84]
+                'values': [32, 48, 64]
             },
             'init_lr': {
                 'values': [1e-3, 75e-4, 5e-4]
@@ -256,4 +251,4 @@ if __name__ == '__main__':
     }
 
     sweep_id = wandb.sweep(sweep_config, project="map")
-    wandb.agent(sweep_id, sweep_train, count=10)
+    wandb.agent(sweep_id, sweep_train, count=20)
