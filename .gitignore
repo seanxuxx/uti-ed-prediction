@@ -1,4 +1,5 @@
 /archive
 /handout
 /submissions
+/wandb
 *.pkl
