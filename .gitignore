@@ -2,4 +2,8 @@
 /handout
 /submissions
 /wandb
+/models
+/reports
 *.pkl
+*.pt*
+*.txt
