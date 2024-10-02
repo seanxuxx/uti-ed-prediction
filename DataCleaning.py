@@ -79,10 +79,10 @@ def encode_features(df: pd.DataFrame) -> tuple[pd.DataFrame, ColumnTransformer]:
     return df_final, preprocessor
 
 
-def process_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def clean_data() -> tuple[np.ndarray, np.ndarray]:
     """
     Returns:
-        X_train, X_test, y_train, y_test
+        X, y
     """
     data_filename = os.path.join(os.getcwd(), 'data', 'S1File.csv')
     metadata_filename = os.path.join(os.getcwd(), 'data', 'metadata.csv')
@@ -106,10 +106,6 @@ def process_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     df_cleaned.head()
 
     X, encoder = encode_features(df_cleaned.iloc[:, 2:])
-    Y = df_cleaned.iloc[:, :2]
-    X_train, X_test, Y_train, Y_test = train_test_split(X.values, Y.values,
-                                                        test_size=0.2,
-                                                        random_state=42)
-    y_train, y_test = Y_train[:, 0], Y_test[:, 1]
+    y = df_cleaned.iloc[:, 0]
 
-    return X_train, X_test, y_train, y_test
+    return X.values, y.values  # type: ignore
